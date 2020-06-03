@@ -1,6 +1,7 @@
 const User = require("../models/user");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const expressJwt = require("express-jwt");
 
 //sendgrid
 const sgMail = require("@sendgrid/mail");
@@ -111,7 +112,7 @@ exports.signIn = (req, res) => {
                 bcrypt.compare(password, user[0].password).then((result) => {
                     if (!result) {
                         return res.status(401).json({
-                            error: "Invalid Credential"
+                            error: "Invalid Credential",
                         });
                     }
 
@@ -131,4 +132,29 @@ exports.signIn = (req, res) => {
         console.error(error.message);
         res.status(500).send("Server error");
     }
+};
+
+exports.requireSignIn = expressJwt({
+    secret: process.env.JWT_SECRET, //req,user
+});
+
+exports.adminMiddleware = (req, res, next) => {
+    User.query()
+        .findById(req.user._id)
+        .then((user) => {
+            if (!user) {
+                return res.status(400).json({
+                    error: "User not found.",
+                });
+            }
+
+            if (user.role !== 'admin') {
+                return res.status(400).json({
+                    error: "Admin resource. Access denied",
+                });
+            }
+
+            req.profile = user
+            next()
+        });
 };

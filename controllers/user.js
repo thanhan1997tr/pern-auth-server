@@ -1,49 +1,65 @@
 const User = require("../models/user");
 const bcrypt = require("bcrypt");
 
-exports.getUser = (req, res) => {
+exports.read = (req, res) => {
     const id = req.params.id;
     User.query()
         .findById(id)
         .then((user) => {
-            if (user) {
-                user.password = undefined
-                return res.json(user);
+            if (!user) {
+                return res.status(400).json({ error: "User not found." });
             }
-            return res.status(400).json({error: "User not found."})
-        }).catch(err => {
+            user.password = undefined;
+            return res.json(user);
+        })
+        .catch((err) => {
             res.json({
-                err
-            })
-        })
-};
-
-exports.updateUser = (req, res) => {
-    const { username, email, password, role } = req.body;
-    console.log(req.body);
-    const id = req.params.id;
-    User.query()
-        .findById(id)
-        .patch({
-            username,
-            email,
-            password: bcrypt.hashSync(password, 10),
-            role,
-        })
-        .then((data) => {
-            if (data > 0) {
-                return res.json({
-                    message: "Update Success!",
-                });
-            } else {
-                return res.json({
-                    message: "Update Fail!",
-                });
-            }
+                err,
+            });
         });
 };
 
-exports.deleteUser = (req, res) => {
+exports.update = (req, res) => {
+    const { username, password } = req.body;
+    const id = req.user._id;
+    User.query()
+        .findById(id)
+        .then((user) => {
+            if (!user) {
+                return res.status(400).json({ error: "User not found." });
+            }
+            if (!username) {
+                return res.status(400).json({ error: "Name is required." });
+            }
+            if (password) {
+                if (password.length < 6) {
+                    return res.status(400).json({
+                        error: "Password should be min 6 characters long.",
+                    });
+                }
+                
+            }
+            
+            User.query()
+                .findById(id)
+                .patch({
+                    username,
+                    password: (password !== "" ? bcrypt.hashSync(password, 10) : user.password),
+                })
+                .returning('*') 
+                .then((data) => {
+                    if (data < 0) {
+                        return res.status(400).json({
+                            error: "User update failed.",
+                        });
+                    }
+                    data.password = undefined;
+                    return res.json(data);
+                });
+        });
+};
+
+exports.delete = (req, res) => {
     const id = req.params.id;
     User.query()
         .deleteById(id)
