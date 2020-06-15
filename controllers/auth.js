@@ -3,15 +3,17 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const expressJwt = require("express-jwt");
 
-//sendgrid
-const sgMail = require("@sendgrid/mail");
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+//Mailgun
+const mailgun = require("mailgun-js")({
+    apiKey: process.env.MAILGUN_API_KEY,
+    domain: process.env.MAILGUN_DOMAIN,
+});
 
 exports.signUp = (req, res) => {
     const { username, email, password } = req.body;
     User.query()
         .where("email", email)
-        .then((data) => {
+        .then(data => {
             if (data.length > 0) {
                 return res.status(400).json({
                     error: "Email is taken",
@@ -35,19 +37,16 @@ exports.signUp = (req, res) => {
                     <p>${process.env.CLIENT_URL}</p>
                 `,
             };
-
-            sgMail
-                .send(emailData)
-                .then(() => {
-                    return res.json({
-                        message: `Email has been sent to ${email}. Follow the instruction to activate your account.`,
+            mailgun.messages().send(emailData, (error, body) => {
+                if (error) {
+                    return res.status(400).json({
+                        error: "Send mail error",
                     });
-                })
-                .catch((err) => {
-                    return res.json({
-                        message: err.response.body,
-                    });
+                }
+                return res.json({
+                    message: `Email has been sent to ${email}. Follow the instruction to reset your password.`,
                 });
+            });
         });
 };
 
@@ -70,7 +69,7 @@ exports.accountActivation = (req, res) => {
 
             User.query()
                 .where("email", email)
-                .then((data) => {
+                .then(data => {
                     if (data.length > 0) {
                         return res.status(400).json({
                             error: "Email is taken",
@@ -88,7 +87,7 @@ exports.accountActivation = (req, res) => {
                                 message: "Signup success! Please sign in.",
                             });
                         })
-                        .catch((err) => {
+                        .catch(err => {
                             return res.json(err);
                         });
                 });
@@ -101,7 +100,7 @@ exports.signIn = (req, res) => {
         const { email, password } = req.body;
         User.query()
             .where("email", email)
-            .then((user) => {
+            .then(user => {
                 if (user.length === 0) {
                     return res.status(400).json({
                         error:
@@ -109,7 +108,7 @@ exports.signIn = (req, res) => {
                     });
                 }
 
-                bcrypt.compare(password, user[0].password).then((result) => {
+                bcrypt.compare(password, user[0].password).then(result => {
                     if (!result) {
                         return res.status(401).json({
                             error: "Invalid Credential",
@@ -141,20 +140,118 @@ exports.requireSignIn = expressJwt({
 exports.adminMiddleware = (req, res, next) => {
     User.query()
         .findById(req.user._id)
-        .then((user) => {
+        .then(user => {
             if (!user) {
                 return res.status(400).json({
                     error: "User not found.",
                 });
             }
 
-            if (user.role !== 'admin') {
+            if (user.role !== "admin") {
                 return res.status(400).json({
                     error: "Admin resource. Access denied",
                 });
             }
 
-            req.profile = user
-            next()
+            req.profile = user;
+            next();
         });
+};
+
+exports.forgotPassword = (req, res) => {
+    const { email } = req.body;
+    User.query()
+        .where("email", email)
+        .then(user => {
+            if (user.length === 0) {
+                return res.status(400).json({
+                    error: "User with that email does not exist.",
+                });
+            }
+
+            const token = jwt.sign(
+                { _id: user[0].id, username: user[0].username },
+                process.env.JWT_RESET_PASSWORD,
+                { expiresIn: "10m" }
+            );
+
+            const emailData = {
+                to: email,
+                from: process.env.EMAIL_FROM,
+                subject: "Password reset link",
+                html: `
+                    <h1>Please use the following link to reset your password.</h1>
+                    <p>${process.env.CLIENT_URL}/auth/password/reset/${token}</p>
+                    <p>This email may contain sensitive information</p>
+                    <p>${process.env.CLIENT_URL}</p>
+                `,
+            };
+            User.query()
+                .where("email", email)
+                .patch({ reset_password_link: token })
+                .then(data => {
+                    mailgun.messages().send(emailData, (error, body) => {
+                        if (error) {
+                            return res.status(400).json({
+                                error: "Send mail error",
+                            });
+                        }
+                        return res.json({
+                            message: `Email has been sent to ${email}. Follow the instruction to reset your password.`,
+                        });
+                    });
+                })
+                .catch(err => {
+                    return res.status(400).json({
+                        error:
+                            "Database connection error on user password forget request.",
+                    });
+                });
+        })
+        .catch(err => {
+            return res.status(400).json({
+                error: err,
+            });
+        });
+};
+
+exports.resetPassword = (req, res) => {
+    const { resetPasswordLink, newPassword } = req.body;
+    if (resetPasswordLink) {
+        jwt.verify(
+            resetPasswordLink,
+            process.env.JWT_RESET_PASSWORD,
+            (err, decoded) => {
+                if (err) {
+                    return res.status(400).json({
+                        error: "Expired link. Try again",
+                    });
+                }
+                const updatedFields = {
+                    password: bcrypt.hashSync(newPassword, 10),
+                    reset_password_link: "",
+                };
+                
+                User.query()
+                    .where("reset_password_link", resetPasswordLink)
+                    .patch(updatedFields)
+                    .returning("*")
+                    .then(user => {
+                        if (user.length == 0) {
+                            return res.status(400).json({
+                                error: 'Error resetting user password.'
+                            })
+                        }
+                        return res.json({
+                            message: `Great! Now you can login with your new password.`
+                        })
+                    }).catch(err => {
+                        return res.status(400).json({
+                            error:
+                            err.name
+                        });
+                    });
+            }
+        );
+    }
 };

@@ -5,14 +5,14 @@ exports.read = (req, res) => {
     const id = req.params.id;
     User.query()
         .findById(id)
-        .then((user) => {
+        .then(user => {
             if (!user) {
                 return res.status(400).json({ error: "User not found." });
             }
             user.password = undefined;
             return res.json(user);
         })
-        .catch((err) => {
+        .catch(err => {
             res.json({
                 err,
             });
@@ -24,7 +24,7 @@ exports.update = (req, res) => {
     const id = req.user._id;
     User.query()
         .findById(id)
-        .then((user) => {
+        .then(user => {
             if (!user) {
                 return res.status(400).json({ error: "User not found." });
             }
@@ -37,17 +37,19 @@ exports.update = (req, res) => {
                         error: "Password should be min 6 characters long.",
                     });
                 }
-                
             }
-            
+
             User.query()
                 .findById(id)
                 .patch({
                     username,
-                    password: (password !== "" ? bcrypt.hashSync(password, 10) : user.password),
+                    password:
+                        password !== ""
+                            ? bcrypt.hashSync(password, 10)
+                            : user.password,
                 })
-                .returning('*') 
-                .then((data) => {
+                .returning("*")
+                .then(data => {
                     if (data < 0) {
                         return res.status(400).json({
                             error: "User update failed.",
@@ -63,7 +65,7 @@ exports.delete = (req, res) => {
     const id = req.params.id;
     User.query()
         .deleteById(id)
-        .then((data) => {
+        .then(data => {
             if (data > 0) {
                 return res.json({
                     message: "Delete Success!",
